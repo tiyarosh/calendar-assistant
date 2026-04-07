@@ -15,16 +15,16 @@ export default function LoginScreen({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-lg p-10 flex flex-col items-center gap-6 w-full max-w-sm">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-10 flex flex-col items-center gap-6 w-full max-w-sm">
         <div className="text-4xl">📅</div>
-        <h1 className="text-2xl font-semibold text-gray-800">Calendar Assistant</h1>
-        <p className="text-sm text-gray-500 text-center">
+        <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">Calendar Assistant</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
           Connect your Google Calendar to get started.
         </p>
         <button
           onClick={handleSignIn}
-          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+          className="w-full flex items-center justify-center gap-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
         >
           <svg className="w-5 h-5" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.14 0 5.95 1.08 8.17 2.86l6.09-6.09C34.46 3.19 29.53 1 24 1 14.82 1 7.07 6.48 3.64 14.22l7.09 5.51C12.3 13.35 17.68 9.5 24 9.5z"/>

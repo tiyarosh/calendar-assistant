@@ -82,27 +82,27 @@ export default function CalendarPanel({ accessToken, onSessionExpired }) {
   }
 
   return (
-    <div className="w-96 bg-white border-r border-gray-200 flex flex-col">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+    <div className="w-96 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
           Upcoming Events
         </h2>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {loading ? (
           [...Array(5)].map((_, i) => (
-            <div key={i} className="rounded-lg bg-gray-50 border border-gray-100 p-3 animate-pulse">
-              <div className="h-3 bg-gray-200 rounded w-3/4 mb-2" />
-              <div className="h-2.5 bg-gray-200 rounded w-1/2" />
+            <div key={i} className="rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-100 dark:border-gray-600 p-3 animate-pulse">
+              <div className="h-3 bg-gray-200 dark:bg-gray-600 rounded w-3/4 mb-2" />
+              <div className="h-2.5 bg-gray-200 dark:bg-gray-600 rounded w-1/2" />
             </div>
           ))
         ) : events.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center mt-8">No upcoming events this week.</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 text-center mt-8">No upcoming events this week.</p>
         ) : (
           events.map((event) => (
             <div
               key={`${event.id}-${event.calendarName}`}
-              className="rounded-lg border border-gray-100 p-3 hover:bg-gray-50 transition-colors"
+              className="rounded-lg border border-gray-100 dark:border-gray-700 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
               <div className="flex items-start gap-2.5">
                 <div
@@ -110,11 +110,11 @@ export default function CalendarPanel({ accessToken, onSessionExpired }) {
                   style={{ backgroundColor: event.calendarColor || '#4285F4' }}
                 />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
                     {event.summary || '(No title)'}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">{formatEventTime(event)}</p>
-                  <p className="text-xs text-gray-400 mt-0.5 truncate">{event.calendarName}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{formatEventTime(event)}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{event.calendarName}</p>
                 </div>
               </div>
             </div>
