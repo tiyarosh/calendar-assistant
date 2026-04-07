@@ -73,10 +73,10 @@ If port 3001 is already in use: `lsof -ti tcp:3001 | xargs kill`
 
 ## Environment Variables
 
-| Variable | Location | Description |
-|---|---|---|
-| `VITE_GOOGLE_CLIENT_ID` | `client/.env.local` | GCP OAuth client ID (baked in at build time) |
-| `ANTHROPIC_API_KEY` | `server/.env` | Claude API key — backend only, never client-side |
+| Variable                | Location            | Description                                      |
+| ----------------------- | ------------------- | ------------------------------------------------ |
+| `VITE_GOOGLE_CLIENT_ID` | `client/.env.local` | GCP OAuth client ID (baked in at build time)     |
+| `ANTHROPIC_API_KEY`     | `server/.env`       | Claude API key — backend only, never client-side |
 
 ## API / Integration Notes
 
@@ -99,3 +99,4 @@ If port 3001 is already in use: `lsof -ti tcp:3001 | xargs kill`
 - **Milestone 1 (2026-04-06):** Frontend shell — React + Vite + Tailwind, all four components, clean build
 - **Milestone 2 (2026-04-07):** Google OAuth (real GIS) + live multi-calendar event fetching
 - **Milestone 3 (2026-04-07):** Dark mode (system preference) + Express backend + Claude SSE streaming chat + `req`/`res` close bug fixed
+- **Milestone 4 (2026-04-07):** Full Tool Suite, Token Caching + Auth Expiry
