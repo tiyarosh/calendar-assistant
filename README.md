@@ -134,3 +134,14 @@ Scaffolded the React + Vite + Tailwind client. Established the two-panel layout 
 - Backend is a deliberate proxy, not a full API — business logic lives in Claude's tool use, not Express routes
 - No component library — Tailwind only, to keep the bundle lean and styling explicit
 - No database — session-only scope keeps the MVP tight and avoids auth/persistence complexity
+
+### Milestone 2 — Google OAuth + Live Calendar Fetching (2026-04-07)
+Replaced mock auth and skeleton placeholders with real Google Identity Services OAuth and live Calendar API data. The app now signs users in, fetches events across all their calendars, and renders them in a sorted, color-coded list.
+
+**Key decisions:**
+- GIS loaded via CDN script tag (not npm) — no package needed, and the implicit token flow is sufficient for a client-side-only auth model
+- `calendar.readonly` scope only — matches the read-only nature of the MVP; no write access requested
+- All calendars fetched in parallel via `Promise.all` over `calendarList` — avoids the simpler primary-calendar-only approach so multi-calendar users get full coverage
+- Events merged and sorted client-side after fetching — keeps each per-calendar request simple and avoids a server-side aggregation step
+- 7-day rolling window with `singleEvents=true` — expands recurring events so they appear as individual items; scoped to one week to keep the list relevant
+- 401 anywhere in the fetch chain signs the user out immediately — simple and safe for a session-only app with no silent re-auth complexity
