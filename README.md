@@ -156,3 +156,36 @@ Replaced mock auth and skeleton placeholders with real Google Identity Services 
 - Events merged and sorted client-side after fetching — keeps each per-calendar request simple and avoids a server-side aggregation step
 - 7-day rolling window with `singleEvents=true` — expands recurring events so they appear as individual items; scoped to one week to keep the list relevant
 - 401 anywhere in the fetch chain signs the user out immediately — simple and safe for a session-only app with no silent re-auth complexity
+
+### Milestone 3 — Express Backend + Claude Chat (2026-04-07)
+
+Scaffolded the Express server and wired the full chat pipeline end-to-end: user message → backend → Claude API with tool use → SSE stream → live bubble in the UI. The assistant can now fetch real calendar data mid-conversation and respond with schedule analysis and drafted emails.
+
+**What was built:**
+
+- `server/server.js` — single-file Express server with one route: `POST /api/chat`
+- Tool use loop — streams Claude's response, intercepts `get_events` tool calls, fetches live events from Google Calendar API across all calendars, appends results, and continues streaming until no further tool calls are made
+- System prompt injected per request with today's date, `get_events` usage rules, email drafting format, and general behavior guidelines (user-designed)
+- SSE keepalive (`: ping` every 3s) sent during tool execution to hold the connection open while Calendar API calls resolve
+- `ChatPanel` fully wired — reads the SSE stream chunk by chunk, appends text to the assistant bubble in real time, shows a blinking cursor while streaming, disables input during in-flight requests
+
+**Key decisions:**
+
+- Business logic in Claude tool use, not Express — the server is intentionally thin; Claude decides when to call `get_events` and what to do with the results
+- System prompt over formal tool definitions for email drafting and schedule analysis — structured instructions in the prompt produce more consistent output than leaving format to Claude's discretion each time
+- `get_events` fetches live from Google Calendar at tool-call time — Claude controls the time range and can ask for data beyond the initial 7-day window shown in the panel
+- CORS on `/api/chat` + direct connection from frontend — Vite's proxy discards SSE response bodies; the frontend bypasses it in dev using `import.meta.env.DEV` with `http://localhost:3001` directly
+- `res.on('close')` for disconnect detection, not `req.on('close')` — see debug note below
+
+**Debug: the `req` vs `res` close bug**
+
+The hardest part of this milestone was a subtle Node.js HTTP lifecycle bug that produced empty chat bubbles with no error output.
+
+Symptom: the assistant bubble appeared but stayed empty after every message. Server logs confirmed Claude was streaming text and `res.write()` was being called — but the browser's `reader.read()` returned `done: true` immediately with no body, and the Network tab's EventStream showed nothing.
+
+Diagnosis path:
+1. Ruled out SSE parsing — a standalone diagnostic script confirmed the Anthropic SDK's `stream.on('text', ...)` fires correctly and the SSE wire format round-trips cleanly through the frontend parser.
+2. Ruled out the Vite proxy — added a `/api/test-sse` smoke-test endpoint; direct fetch from browser console confirmed SSE worked end-to-end from port 3001. Switched the frontend to connect directly and added CORS.
+3. Added `aborted` flag logging — server logs revealed `[chat] req close fired — aborted = true` firing immediately after the stream started, *before* any text events. Because `if (!aborted) send(...)` guarded every write, all text was silently dropped.
+
+Root cause: the disconnect guard was on `req.on('close', ...)`. In Node.js HTTP, `req` is the *inbound* request stream — it closes as soon as `express.json()` finishes parsing the POST body, which is immediate and expected. `res` is the *outbound* response stream, and `res.on('close', ...)` is what actually signals that the SSE connection dropped. Changing one word (`req` → `res`) fixed it entirely.
