@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 
-export default function ChatPanel({ accessToken }) {
+export default function ChatPanel({ accessToken, onSessionExpired }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -79,6 +79,16 @@ export default function ChatPanel({ accessToken }) {
               }
               return next
             })
+          } else if (chunk.type === 'auth_expired') {
+            setMessages((prev) => {
+              const next = [...prev]
+              next[next.length - 1] = {
+                role: 'assistant',
+                content: 'Your session has expired. Signing you out — please sign in again.',
+              }
+              return next
+            })
+            onSessionExpired?.()
           }
         }
       }

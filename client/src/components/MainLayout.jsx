@@ -18,7 +18,7 @@ export default function MainLayout({ accessToken, onLogout }) {
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         <CalendarPanel accessToken={accessToken} onSessionExpired={onLogout} />
-        <ChatPanel accessToken={accessToken} />
+        <ChatPanel accessToken={accessToken} onSessionExpired={onLogout} />
       </div>
     </div>
   )

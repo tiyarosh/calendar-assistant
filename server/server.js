@@ -16,30 +16,79 @@ app.use('/api/chat', (req, res, next) => {
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+// ── Token cache ───────────────────────────────────────────────────────────────
+// Single-user MVP — stores the Google OAuth token in memory so it doesn't
+// need to be sent on every request. Updated on receipt; invalidated on 401.
+
+let cachedToken = null
+
+class TokenExpiredError extends Error {
+  constructor() { super('Google token expired — please sign in again') }
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS = [
   {
     name: 'get_events',
-    description:
-      "Fetch the user's Google Calendar events for a given time range across all their calendars.",
+    description: "Fetch the user's Google Calendar events across all calendars for a given date range. Use this for specific event lookups or when you need the raw event list.",
     input_schema: {
       type: 'object',
       properties: {
-        time_min: {
+        start_date: {
           type: 'string',
-          description: 'Start of the time range as an ISO 8601 datetime string (e.g. 2026-04-07T00:00:00Z).',
+          description: 'Start of the range as an ISO 8601 datetime string (e.g. 2026-04-07T00:00:00Z).',
         },
-        time_max: {
+        end_date: {
           type: 'string',
-          description: 'End of the time range as an ISO 8601 datetime string.',
+          description: 'End of the range as an ISO 8601 datetime string.',
         },
         max_results: {
           type: 'integer',
-          description: 'Maximum number of events to return in total. Defaults to 20.',
+          description: 'Maximum total events to return. Defaults to 20.',
         },
       },
-      required: ['time_min', 'time_max'],
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
+    name: 'analyze_schedule',
+    description: "Fetch and analyze the user's meeting load for a date range. Returns total meeting hours, busiest day, per-day breakdown, and the full event list for Claude to narrate. Use this for questions about busyness, free time, meeting patterns, or schedule summaries.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start of the analysis window as an ISO 8601 datetime string.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of the analysis window as an ISO 8601 datetime string.',
+        },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
+  {
+    name: 'draft_email',
+    description: 'Format and return an email draft. Always call this tool when the user asks you to write, draft, or compose an email — never write email drafts as plain text. You supply all content; the tool packages it consistently.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        recipient_name: {
+          type: 'string',
+          description: 'Name (and optionally email address) of the recipient.',
+        },
+        subject: {
+          type: 'string',
+          description: 'Email subject line.',
+        },
+        context: {
+          type: 'string',
+          description: 'Full email body text. Write this as a complete, ready-to-send email.',
+        },
+      },
+      required: ['recipient_name', 'subject', 'context'],
     },
   },
 ]
@@ -58,42 +107,44 @@ function buildSystemPrompt() {
 
 You are a highly capable calendar assistant. Today's date is **${date}**.
 
-## Core Capabilities
+## Tools Available
 
-You have access to the user's Google Calendar through the \`get_events\` tool. Use it proactively whenever the user asks about their schedule, availability, upcoming events, conflicts, or anything that requires knowledge of their calendar.
+- \`get_events\` — fetch raw calendar events for a date range
+- \`analyze_schedule\` — fetch events and compute meeting load stats; use this for questions about busyness, free time, or schedule patterns
+- \`draft_email\` — format and present an email draft; always use this tool when composing emails
 
 ## Instructions
 
-Follow these guidelines when responding to user requests:
-
 ### Calendar Queries
-1. When the user asks about their schedule, availability, or events, **always call the \`get_events\` tool first** before responding. Do not guess or assume what is on the calendar.
-2. Present calendar information in a clear, organized format (e.g., chronological order with times, event names, and relevant details such as location or attendees).
-3. When checking for conflicts or free time, compare all relevant events and explicitly state any overlaps or open windows.
+1. Always call \`get_events\` or \`analyze_schedule\` before answering questions about the user's schedule. Do not guess or assume what is on the calendar.
+2. Use \`analyze_schedule\` for questions about meeting load, free time, or patterns. Use \`get_events\` for specific event lookups.
+3. Present calendar information chronologically with times, event names, and relevant details such as location or attendees.
+4. When checking for conflicts or free time, compare all relevant events and explicitly state any overlaps or open windows.
 
 ### Email Drafting
-1. When asked to draft an email (e.g., to reschedule a meeting, invite attendees, send a summary), **present the full draft inline in the chat** using a clearly formatted block.
-2. **Do not send the email.** Always present it for the user's review and wait for explicit approval or edits before taking any further action.
-3. Include all standard email fields in the draft: **To**, **Subject**, and **Body**. Pre-fill fields with relevant information from the calendar context when available (e.g., attendee email addresses, event names, proposed times).
+1. Always call \`draft_email\` when composing emails — never write them as plain text.
+2. Do not send the email. Present it for the user's review and wait for explicit approval.
+3. Pre-fill recipient, subject, and body from calendar context when available (attendee names, event times, proposed alternatives).
 
 ### General Behavior
 - Be concise but thorough. Provide all relevant details without unnecessary filler.
-- If a request is ambiguous (e.g., "move my meeting"), ask a clarifying question rather than making assumptions — specify which meeting, what new time, etc.
-- When suggesting times or changes, take into account the user's existing calendar to avoid conflicts.
-- Use relative time references naturally (e.g., "tomorrow at 2 PM," "this Friday") alongside absolute dates for clarity.
-- If the \`get_events\` tool returns no results or an error, inform the user clearly and suggest next steps.`
+- If a request is ambiguous, ask a clarifying question rather than assuming.
+- Use relative time references naturally ("tomorrow at 2 PM", "this Friday") alongside absolute dates.
+- If a tool returns an error, inform the user clearly and suggest next steps.`
 }
 
-// ── Tool execution ────────────────────────────────────────────────────────────
+// ── Shared Google Calendar fetch ──────────────────────────────────────────────
 
-async function executeGetEvents(input, accessToken) {
-  const { time_min, time_max, max_results = 20 } = input
-
-  // Fetch all calendars
+async function fetchCalendarEvents(start_date, end_date, max_results = 20) {
+  // Fetch all calendars the user has access to
   const listRes = await fetch(
     'https://www.googleapis.com/calendar/v3/users/me/calendarList',
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    { headers: { Authorization: `Bearer ${cachedToken}` } }
   )
+  if (listRes.status === 401) {
+    cachedToken = null
+    throw new TokenExpiredError()
+  }
   if (!listRes.ok) throw new Error(`Calendar list fetch failed: ${listRes.status}`)
   const { items: calendars } = await listRes.json()
 
@@ -104,15 +155,17 @@ async function executeGetEvents(input, accessToken) {
       const url = new URL(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events`
       )
-      url.searchParams.set('timeMin', time_min)
-      url.searchParams.set('timeMax', time_max)
+      url.searchParams.set('timeMin', start_date)
+      url.searchParams.set('timeMax', end_date)
       url.searchParams.set('maxResults', String(perCalendarLimit))
       url.searchParams.set('singleEvents', 'true')
       url.searchParams.set('orderBy', 'startTime')
 
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${cachedToken}` } })
+      if (res.status === 401) {
+        cachedToken = null
+        throw new TokenExpiredError()
+      }
       if (!res.ok) return []
       const data = await res.json()
       return (data.items || []).map((e) => ({
@@ -128,7 +181,6 @@ async function executeGetEvents(input, accessToken) {
     })
   )
 
-  // Merge across calendars and sort chronologically
   return results
     .flat()
     .sort((a, b) => {
@@ -138,12 +190,64 @@ async function executeGetEvents(input, accessToken) {
     })
 }
 
-// ── SSE smoke test (GET /api/test-sse) ───────────────────────────────────────
-// Run in browser console:
-//   const r = await fetch('http://localhost:3001/api/test-sse')
-//   const reader = r.body.getReader()
-//   let d; while (!(d = await reader.read()).done) console.log(new TextDecoder().decode(d.value))
-app.get('/api/test-sse', (req, res) => {
+// ── Tool execution ────────────────────────────────────────────────────────────
+
+async function executeGetEvents({ start_date, end_date, max_results }) {
+  return fetchCalendarEvents(start_date, end_date, max_results)
+}
+
+async function executeAnalyzeSchedule({ start_date, end_date }) {
+  const events = await fetchCalendarEvents(start_date, end_date, 100)
+
+  // Only timed events count toward hour stats (all-day events excluded)
+  const timed = events.filter((e) => e.start.dateTime)
+
+  let totalMinutes = 0
+  const minutesByDay = {}
+
+  for (const event of timed) {
+    const start = new Date(event.start.dateTime)
+    const end = new Date(event.end.dateTime)
+    const duration = (end - start) / 60000
+
+    totalMinutes += duration
+
+    const day = start.toLocaleDateString('en-US', {
+      weekday: 'long', month: 'short', day: 'numeric',
+    })
+    minutesByDay[day] = (minutesByDay[day] || 0) + duration
+  }
+
+  const busiestEntry = Object.entries(minutesByDay).sort((a, b) => b[1] - a[1])[0]
+
+  return {
+    total_events: events.length,
+    timed_events: timed.length,
+    all_day_events: events.length - timed.length,
+    total_meeting_hours: Math.round((totalMinutes / 60) * 10) / 10,
+    average_meeting_minutes: timed.length > 0 ? Math.round(totalMinutes / timed.length) : 0,
+    busiest_day: busiestEntry
+      ? { day: busiestEntry[0], hours: Math.round((busiestEntry[1] / 60) * 10) / 10 }
+      : null,
+    meeting_hours_by_day: Object.fromEntries(
+      Object.entries(minutesByDay).map(([day, mins]) => [day, Math.round((mins / 60) * 10) / 10])
+    ),
+    events,
+  }
+}
+
+function executeDraftEmail({ recipient_name, subject, context }) {
+  return {
+    to: recipient_name,
+    subject,
+    body: context,
+    formatted: `To: ${recipient_name}\nSubject: ${subject}\n\n${context}`,
+  }
+}
+
+// ── SSE smoke test ────────────────────────────────────────────────────────────
+
+app.get('/api/test-sse', (_req, res) => {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -159,12 +263,18 @@ app.get('/api/test-sse', (req, res) => {
 app.post('/api/chat', async (req, res) => {
   const { messages, accessToken } = req.body
 
-  if (!messages?.length || !accessToken) {
-    return res.status(400).json({ error: 'messages and accessToken are required' })
+  if (!messages?.length) {
+    return res.status(400).json({ error: 'messages is required' })
   }
 
-  // SSE setup — flushHeaders sends headers immediately so the proxy
-  // doesn't buffer events waiting for the first write()
+  // Update token cache whenever a fresh token is provided
+  if (accessToken) cachedToken = accessToken
+
+  if (!cachedToken) {
+    return res.status(401).json({ error: 'No Google token — please sign in' })
+  }
+
+  // SSE setup
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -172,16 +282,15 @@ app.post('/api/chat', async (req, res) => {
 
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
 
-  // Abort stream if client disconnects.
-  // Use res.on('close') — req.on('close') fires when the request body is
-  // consumed (normal POST lifecycle), not when the SSE connection closes.
+  // Use res.on('close') — req.on('close') fires when the POST body is consumed,
+  // not when the SSE connection drops.
   let aborted = false
   res.on('close', () => { aborted = true })
 
   try {
     let currentMessages = [...messages]
 
-    // Tool use loop — keeps cycling until Claude produces no more tool calls
+    // Tool use loop — cycles until Claude produces no more tool calls
     while (!aborted) {
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-6',
@@ -191,7 +300,6 @@ app.post('/api/chat', async (req, res) => {
         messages: currentMessages,
       })
 
-      // Forward text deltas to the client as they arrive
       stream.on('text', (text) => {
         if (!aborted) send({ type: 'text', text })
       })
@@ -201,26 +309,26 @@ app.post('/api/chat', async (req, res) => {
 
       const toolCalls = message.content.filter((b) => b.type === 'tool_use')
 
-      // No tool calls — Claude is done
       if (toolCalls.length === 0) {
         send({ type: 'done' })
         break
       }
 
-      // Keep the SSE connection alive while tool calls are executing.
-      // Without this, a silent gap during Google Calendar fetches can
-      // cause the browser to close the connection before round 2 starts.
+      // Keep connection alive during tool execution
       const keepalive = setInterval(() => {
         if (!aborted) res.write(': ping\n\n')
       }, 3000)
 
-      // Execute each tool call and collect results
       const toolResults = await Promise.all(
         toolCalls.map(async (block) => {
           try {
             let result
             if (block.name === 'get_events') {
-              result = await executeGetEvents(block.input, accessToken)
+              result = await executeGetEvents(block.input)
+            } else if (block.name === 'analyze_schedule') {
+              result = await executeAnalyzeSchedule(block.input)
+            } else if (block.name === 'draft_email') {
+              result = executeDraftEmail(block.input)
             } else {
               result = { error: `Unknown tool: ${block.name}` }
             }
@@ -230,6 +338,7 @@ app.post('/api/chat', async (req, res) => {
               content: JSON.stringify(result),
             }
           } catch (err) {
+            if (err instanceof TokenExpiredError) throw err  // propagate — exits the loop
             return {
               type: 'tool_result',
               tool_use_id: block.id,
@@ -239,9 +348,9 @@ app.post('/api/chat', async (req, res) => {
           }
         })
       )
+
       clearInterval(keepalive)
 
-      // Append assistant turn + tool results and loop
       currentMessages = [
         ...currentMessages,
         { role: 'assistant', content: message.content },
@@ -249,8 +358,12 @@ app.post('/api/chat', async (req, res) => {
       ]
     }
   } catch (err) {
-    console.error('Chat error:', err)
-    if (!aborted) send({ type: 'error', message: err.message })
+    if (err instanceof TokenExpiredError) {
+      if (!aborted) send({ type: 'auth_expired' })
+    } else {
+      console.error('Chat error:', err)
+      if (!aborted) send({ type: 'error', message: err.message })
+    }
   } finally {
     res.end()
   }
