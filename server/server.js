@@ -5,6 +5,15 @@ import Anthropic from '@anthropic-ai/sdk'
 const app = express()
 app.use(express.json())
 
+// Allow the Vite dev server to connect directly (bypassing the proxy for SSE)
+app.use('/api/chat', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -129,6 +138,22 @@ async function executeGetEvents(input, accessToken) {
     })
 }
 
+// ── SSE smoke test (GET /api/test-sse) ───────────────────────────────────────
+// Run in browser console:
+//   const r = await fetch('http://localhost:3001/api/test-sse')
+//   const reader = r.body.getReader()
+//   let d; while (!(d = await reader.read()).done) console.log(new TextDecoder().decode(d.value))
+app.get('/api/test-sse', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.flushHeaders()
+  res.write('data: {"type":"text","text":"chunk 1"}\n\n')
+  setTimeout(() => res.write('data: {"type":"text","text":" chunk 2"}\n\n'), 500)
+  setTimeout(() => { res.write('data: {"type":"done"}\n\n'); res.end() }, 1000)
+})
+
 // ── Chat route ────────────────────────────────────────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
@@ -138,16 +163,20 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'messages and accessToken are required' })
   }
 
-  // SSE setup
+  // SSE setup — flushHeaders sends headers immediately so the proxy
+  // doesn't buffer events waiting for the first write()
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
 
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
 
-  // Abort stream if client disconnects
+  // Abort stream if client disconnects.
+  // Use res.on('close') — req.on('close') fires when the request body is
+  // consumed (normal POST lifecycle), not when the SSE connection closes.
   let aborted = false
-  req.on('close', () => { aborted = true })
+  res.on('close', () => { aborted = true })
 
   try {
     let currentMessages = [...messages]
@@ -178,6 +207,13 @@ app.post('/api/chat', async (req, res) => {
         break
       }
 
+      // Keep the SSE connection alive while tool calls are executing.
+      // Without this, a silent gap during Google Calendar fetches can
+      // cause the browser to close the connection before round 2 starts.
+      const keepalive = setInterval(() => {
+        if (!aborted) res.write(': ping\n\n')
+      }, 3000)
+
       // Execute each tool call and collect results
       const toolResults = await Promise.all(
         toolCalls.map(async (block) => {
@@ -203,6 +239,7 @@ app.post('/api/chat', async (req, res) => {
           }
         })
       )
+      clearInterval(keepalive)
 
       // Append assistant turn + tool results and loop
       currentMessages = [

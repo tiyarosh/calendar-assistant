@@ -31,7 +31,10 @@ export default function ChatPanel({ accessToken }) {
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
     try {
-      const res = await fetch('/api/chat', {
+      // In dev, connect directly to bypass Vite's proxy (which discards SSE bodies).
+      // In production, use a relative URL through whatever reverse proxy is in front.
+      const apiBase = import.meta.env.DEV ? 'http://localhost:3001' : ''
+      const res = await fetch(`${apiBase}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
