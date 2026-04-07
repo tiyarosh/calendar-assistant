@@ -114,10 +114,10 @@ calendar-assistant/
 
 **Environment Variables**
 
-| Variable            | Description                      |
-| ------------------- | -------------------------------- |
-| `GOOGLE_CLIENT_ID`  | OAuth client ID from GCP console |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude     |
+| Variable                | Description                      |
+| ----------------------- | -------------------------------- |
+| `VITE_GOOGLE_CLIENT_ID` | OAuth client ID from GCP console |
+| `ANTHROPIC_API_KEY`     | Anthropic API key for Claude     |
 
 ---
 
@@ -184,8 +184,9 @@ The hardest part of this milestone was a subtle Node.js HTTP lifecycle bug that 
 Symptom: the assistant bubble appeared but stayed empty after every message. Server logs confirmed Claude was streaming text and `res.write()` was being called — but the browser's `reader.read()` returned `done: true` immediately with no body, and the Network tab's EventStream showed nothing.
 
 Diagnosis path:
+
 1. Ruled out SSE parsing — a standalone diagnostic script confirmed the Anthropic SDK's `stream.on('text', ...)` fires correctly and the SSE wire format round-trips cleanly through the frontend parser.
 2. Ruled out the Vite proxy — added a `/api/test-sse` smoke-test endpoint; direct fetch from browser console confirmed SSE worked end-to-end from port 3001. Switched the frontend to connect directly and added CORS.
-3. Added `aborted` flag logging — server logs revealed `[chat] req close fired — aborted = true` firing immediately after the stream started, *before* any text events. Because `if (!aborted) send(...)` guarded every write, all text was silently dropped.
+3. Added `aborted` flag logging — server logs revealed `[chat] req close fired — aborted = true` firing immediately after the stream started, _before_ any text events. Because `if (!aborted) send(...)` guarded every write, all text was silently dropped.
 
-Root cause: the disconnect guard was on `req.on('close', ...)`. In Node.js HTTP, `req` is the *inbound* request stream — it closes as soon as `express.json()` finishes parsing the POST body, which is immediate and expected. `res` is the *outbound* response stream, and `res.on('close', ...)` is what actually signals that the SSE connection dropped. Changing one word (`req` → `res`) fixed it entirely.
+Root cause: the disconnect guard was on `req.on('close', ...)`. In Node.js HTTP, `req` is the _inbound_ request stream — it closes as soon as `express.json()` finishes parsing the POST body, which is immediate and expected. `res` is the _outbound_ response stream, and `res.on('close', ...)` is what actually signals that the SSE connection dropped. Changing one word (`req` → `res`) fixed it entirely.
