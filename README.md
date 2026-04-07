@@ -190,3 +190,21 @@ Diagnosis path:
 3. Added `aborted` flag logging — server logs revealed `[chat] req close fired — aborted = true` firing immediately after the stream started, _before_ any text events. Because `if (!aborted) send(...)` guarded every write, all text was silently dropped.
 
 Root cause: the disconnect guard was on `req.on('close', ...)`. In Node.js HTTP, `req` is the _inbound_ request stream — it closes as soon as `express.json()` finishes parsing the POST body, which is immediate and expected. `res` is the _outbound_ response stream, and `res.on('close', ...)` is what actually signals that the SSE connection dropped. Changing one word (`req` → `res`) fixed it entirely.
+
+### Milestone 4 — Full Tool Suite, Token Caching + Auth Expiry (2026-04-07)
+
+Completed the tool use layer. All three tools are now formally defined in the Anthropic API call and fully executed server-side. Added server-side token caching and graceful expired-token handling. This milestone concludes major feature development.
+
+**What was built:**
+
+- `analyze_schedule` tool — fetches events internally via the shared `fetchCalendarEvents` helper, computes total meeting hours, average meeting duration, busiest day, per-day breakdown, and all-day vs timed event counts; returns structured data for Claude to narrate
+- `draft_email` tool — synchronous, no external calls; Claude supplies `recipient_name`, `subject`, and the full `context` (body); tool packages it into a consistently formatted object
+- `TokenExpiredError` class — thrown when Google returns 401 anywhere in the fetch chain; re-propagated out of the tool execution block to the outer catch, which sends `{ type: 'auth_expired' }` via SSE before closing the stream
+- `ChatPanel` auth expiry handling — on `auth_expired` event, shows a message in the bubble then calls `onSessionExpired()`, which resets the token in `App.jsx` and returns to the login screen
+
+**Key decisions:**
+
+- Formal tool definitions for all three tools — `get_events`, `analyze_schedule`, and `draft_email` are all defined in the `TOOLS` array passed to the Anthropic API, replacing the earlier approach of embedding email drafting and schedule analysis as system prompt instructions; structured tool definitions produce more consistent, predictable output
+- Token caching on the backend — `cachedToken` module-level variable updated on every request that includes an `accessToken`; all Google API calls read from the cache rather than passing the token through every function signature; cache is invalidated immediately on any 401 from Google
+- Graceful re-auth over silent failure — a 401 from Google propagates as a typed error all the way to the SSE stream, surfaces a human-readable message in the chat bubble, then signs the user out cleanly; no silent swallowing of auth errors
+- `analyze_schedule` computes stats server-side — returns structured data (numbers, breakdowns) for Claude to narrate, rather than asking Claude to do arithmetic over raw event lists
