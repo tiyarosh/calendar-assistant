@@ -1,0 +1,13 @@
+{
+  "name": "calendar-assistant-server",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "server": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
