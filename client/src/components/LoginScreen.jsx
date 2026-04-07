@@ -1,5 +1,19 @@
 export default function LoginScreen({ onLogin }) {
-  // Placeholder — Google OAuth wired in next
+  function handleSignIn() {
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/calendar.readonly',
+      callback: (response) => {
+        if (response.error) {
+          console.error('OAuth error:', response.error)
+          return
+        }
+        onLogin(response.access_token)
+      },
+    })
+    client.requestAccessToken()
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="bg-white rounded-2xl shadow-lg p-10 flex flex-col items-center gap-6 w-full max-w-sm">
@@ -9,7 +23,7 @@ export default function LoginScreen({ onLogin }) {
           Connect your Google Calendar to get started.
         </p>
         <button
-          onClick={() => onLogin('mock-token')}
+          onClick={handleSignIn}
           className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
         >
           <svg className="w-5 h-5" viewBox="0 0 48 48">
