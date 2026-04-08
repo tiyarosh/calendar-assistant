@@ -214,3 +214,13 @@ Completed the tool use layer. All three tools are now formally defined in the An
 - Token caching on the backend — `cachedToken` module-level variable updated on every request that includes an `accessToken`; all Google API calls read from the cache rather than passing the token through every function signature; cache is invalidated immediately on any 401 from Google
 - Graceful re-auth over silent failure — a 401 from Google propagates as a typed error all the way to the SSE stream, surfaces a human-readable message in the chat bubble, then signs the user out cleanly; no silent swallowing of auth errors
 - `analyze_schedule` computes stats server-side — returns structured data (numbers, breakdowns) for Claude to narrate, rather than asking Claude to do arithmetic over raw event lists
+
+## Milestone 5 - User Acceptance Testing, UI Polish, System Prompt Refinement, and Documentation (2026-04-08)
+
+- User acceptance testing — ran through multiple real-world scenarios, including heavy meeting weeks, all-day events, and expired tokens; verified correct tool use, graceful error handling, and overall UX flow
+
+- Bugs identified and fixed:
+  - Remove unnecessary '#', '\*' markdown characters from the assistant's response: fixed by adding a simple regex replacement in the frontend after receiving each text chunk, ensuring cleaner display in the chat bubble
+  - Request to draft email in different tone did not produce email within chat bubble: fixed by ensuring `draft_email` tool returns the full email object and that the system prompt instructs Claude to include the email content in its response
+  - Scroll functionality of the chat window: fixed by adjusting CSS to ensure the chat panel scrolls independently of the main layout
+  - Click into events functionality missing from calendar panel: added an `onClick` handler to each event item that opens the corresponding Google Calendar event in a pop-up window.
