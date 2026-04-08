@@ -31,7 +31,7 @@ class TokenExpiredError extends Error {
 const TOOLS = [
   {
     name: 'get_events',
-    description: "Fetch the user's Google Calendar events across all calendars for a given date range. Use this for specific event lookups or when you need the raw event list.",
+    description: "Fetch the user's Google Calendar events for a given date range. Optionally filter to a specific calendar by name. Use this for specific event lookups or when you need the raw event list.",
     input_schema: {
       type: 'object',
       properties: {
@@ -46,6 +46,10 @@ const TOOLS = [
         max_results: {
           type: 'integer',
           description: 'Maximum total events to return. Defaults to 20.',
+        },
+        calendar_name: {
+          type: 'string',
+          description: 'Optional. If provided, only return events from the calendar whose name contains this string (case-insensitive). Use when the user asks about a specific calendar.',
         },
       },
       required: ['start_date', 'end_date'],
@@ -118,7 +122,7 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 ### Calendar Queries
 1. Always call \`get_events\` or \`analyze_schedule\` before answering questions about the user's schedule. Do not guess or assume what is on the calendar.
 2. Use \`analyze_schedule\` for questions about meeting load, free time, or patterns. Use \`get_events\` for specific event lookups.
-3. Present calendar information chronologically with times, event names, and relevant details such as location or attendees.
+3. Present calendar information chronologically with times, event names, and relevant details such as location or attendees. Always use the pre-formatted \`display_date\` field for dates and times — never interpret or convert \`start.dateTime\` or \`start.date\` yourself.
 4. When checking for conflicts or free time, compare all relevant events and explicitly state any overlaps or open windows.
 
 ### Email Drafting
@@ -136,9 +140,36 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 - Do not use markdown formatting in responses. Use plain text only — no headers, bold, bullets with *, or other markdown syntax.`
 }
 
+// ── Date formatting helpers ───────────────────────────────────────────────────
+
+// Formats a human-readable date/time string in the user's local timezone.
+// Parses the ISO 8601 datetime via Date (respects the embedded UTC offset),
+// then formats using Intl.DateTimeFormat with the user-supplied IANA timezone.
+function formatDisplayDateTime(start, end, timezone) {
+  const tz = timezone || 'UTC'
+
+  if (start.date) {
+    // All-day event: "YYYY-MM-DD" — no time component, treat as a plain calendar date
+    const [year, month, day] = start.date.split('-').map(Number)
+    const d = new Date(year, month - 1, day)
+    return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + ' (all day)'
+  }
+
+  const startD = new Date(start.dateTime)
+  const datePart = startD.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz,
+  })
+  const startTime = startD.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz })
+  const endPart = end?.dateTime
+    ? ` – ${new Date(end.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz })}`
+    : ''
+
+  return `${datePart} at ${startTime}${endPart}`
+}
+
 // ── Shared Google Calendar fetch ──────────────────────────────────────────────
 
-async function fetchCalendarEvents(start_date, end_date, max_results = 20) {
+async function fetchCalendarEvents(start_date, end_date, max_results = 20, calendar_name = null, timezone = null) {
   // Fetch all calendars the user has access to
   const listRes = await fetch(
     'https://www.googleapis.com/calendar/v3/users/me/calendarList',
@@ -149,7 +180,13 @@ async function fetchCalendarEvents(start_date, end_date, max_results = 20) {
     throw new TokenExpiredError()
   }
   if (!listRes.ok) throw new Error(`Calendar list fetch failed: ${listRes.status}`)
-  const { items: calendars } = await listRes.json()
+  let { items: calendars } = await listRes.json()
+
+  // Filter to a specific calendar if requested
+  if (calendar_name) {
+    const needle = calendar_name.toLowerCase()
+    calendars = calendars.filter((cal) => cal.summary?.toLowerCase().includes(needle))
+  }
 
   // Fetch events from every calendar in parallel
   const perCalendarLimit = Math.min(max_results, 50)
@@ -174,6 +211,7 @@ async function fetchCalendarEvents(start_date, end_date, max_results = 20) {
       return (data.items || []).map((e) => ({
         id: e.id,
         summary: e.summary,
+        display_date: formatDisplayDateTime(e.start, e.end, timezone),
         start: e.start,
         end: e.end,
         location: e.location,
@@ -195,8 +233,8 @@ async function fetchCalendarEvents(start_date, end_date, max_results = 20) {
 
 // ── Tool execution ────────────────────────────────────────────────────────────
 
-async function executeGetEvents({ start_date, end_date, max_results }) {
-  return fetchCalendarEvents(start_date, end_date, max_results)
+async function executeGetEvents({ start_date, end_date, max_results, calendar_name }, timezone) {
+  return fetchCalendarEvents(start_date, end_date, max_results, calendar_name, timezone)
 }
 
 async function executeAnalyzeSchedule({ start_date, end_date }) {
@@ -264,7 +302,7 @@ app.get('/api/test-sse', (_req, res) => {
 // ── Chat route ────────────────────────────────────────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
-  const { messages, accessToken } = req.body
+  const { messages, accessToken, timezone } = req.body
 
   if (!messages?.length) {
     return res.status(400).json({ error: 'messages is required' })
@@ -327,7 +365,7 @@ app.post('/api/chat', async (req, res) => {
           try {
             let result
             if (block.name === 'get_events') {
-              result = await executeGetEvents(block.input)
+              result = await executeGetEvents(block.input, timezone)
             } else if (block.name === 'analyze_schedule') {
               result = await executeAnalyzeSchedule(block.input)
             } else if (block.name === 'draft_email') {

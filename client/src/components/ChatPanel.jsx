@@ -1,5 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 
+// Ensures a space follows sentence-ending punctuation before the next word.
+// Applied after each chunk so "sentence.Next" becomes "sentence. Next".
+const normalizePunctuation = (text) => text.replace(/([.!?])([A-Za-z])/g, '$1 $2')
+
 export default function ChatPanel({ accessToken, onSessionExpired }) {
   const [messages, setMessages] = useState([
     {
@@ -40,6 +44,7 @@ export default function ChatPanel({ accessToken, onSessionExpired }) {
         body: JSON.stringify({
           messages: updatedMessages,
           accessToken,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       })
 
@@ -66,7 +71,7 @@ export default function ChatPanel({ accessToken, onSessionExpired }) {
               const next = [...prev]
               next[next.length - 1] = {
                 role: 'assistant',
-                content: next[next.length - 1].content + chunk.text,
+                content: normalizePunctuation(next[next.length - 1].content + chunk.text),
               }
               return next
             })
@@ -116,17 +121,27 @@ export default function ChatPanel({ accessToken, onSessionExpired }) {
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-xl rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`max-w-xl rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                 msg.role === 'user'
                   ? 'bg-blue-600 text-white rounded-br-sm'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm'
               }`}
             >
-              {msg.content}
-              {/* Blinking cursor on the last message while streaming */}
-              {streaming && i === messages.length - 1 && msg.role === 'assistant' && (
-                <span className="inline-block w-0.5 h-3.5 bg-current ml-0.5 align-middle animate-pulse" />
-              )}
+              {msg.content.split(/\n\n+/).map((para, pi, arr) => (
+                <p key={pi} className={pi > 0 ? 'mt-3' : ''}>
+                  {para.split('\n').map((line, li, lines) => {
+                    const isLastLine = pi === arr.length - 1 && li === lines.length - 1
+                    return (
+                      <span key={li} className={`block ${li > 0 ? 'mt-1' : ''}`}>
+                        {line}
+                        {streaming && i === messages.length - 1 && msg.role === 'assistant' && isLastLine && (
+                          <span className="inline-block w-0.5 h-3.5 bg-current ml-0.5 align-middle animate-pulse" />
+                        )}
+                      </span>
+                    )
+                  })}
+                </p>
+              ))}
             </div>
           </div>
         ))}
