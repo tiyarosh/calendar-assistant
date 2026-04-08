@@ -112,7 +112,7 @@ export default function ChatPanel({ accessToken, onSessionExpired }) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white dark:bg-gray-800">
+    <div className="flex-1 flex flex-col bg-white dark:bg-gray-800 overflow-hidden">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {messages.map((msg, i) => (

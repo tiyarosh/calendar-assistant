@@ -356,7 +356,7 @@ export default function CalendarPanel({ accessToken, onSessionExpired, view, onV
 
       {/* Events */}
       {view === 'monthly' ? (
-        <div className="flex-1 overflow-hidden px-2 pb-2">
+        <div className="flex-1 overflow-y-auto px-2 pb-2">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-sm text-gray-400 dark:text-gray-500">Loading…</div>
