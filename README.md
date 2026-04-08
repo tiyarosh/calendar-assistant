@@ -83,13 +83,23 @@ calendar-assistant/
 │   │   └── components/
 │   │       ├── LoginScreen.jsx    # Google OAuth sign-in
 │   │       ├── MainLayout.jsx     # Header + two-panel shell
-│   │       ├── CalendarPanel.jsx  # Upcoming events list
+│   │       ├── CalendarPanel.jsx  # Daily/weekly/monthly/upcoming views with grid, nav, and event popup
 │   │       └── ChatPanel.jsx      # Conversational chat UI
 │   ├── vite.config.js         # Vite config + /api proxy
 │   ├── tailwind.config.js
 │   └── package.json
-├── server/                    # Express backend (coming soon)
-│   └── ...
+├── server/                    # Node.js + Express backend
+│   ├── server.js              # Single-file Express server — tools, prompt, SSE chat handler
+│   │   ├── TOOLS              # Anthropic tool definitions: get_events, analyze_schedule, draft_email
+│   │   ├── buildSystemPrompt()       # Injects today's date and plain-text behavior instructions
+│   │   ├── formatDisplayDateTime()   # Formats event dates in the user's IANA timezone
+│   │   ├── fetchCalendarEvents()     # Shared Google Calendar fetch (calendarList + parallel events)
+│   │   ├── executeGetEvents()        # Runs get_events tool — supports optional calendar_name filter
+│   │   ├── executeAnalyzeSchedule()  # Computes meeting load stats for Claude to narrate
+│   │   ├── executeDraftEmail()       # Packages email fields into a consistent formatted result
+│   │   └── POST /api/chat     # SSE endpoint — tool use loop, keepalive pings, auth expiry handling
+│   ├── .env                   # ANTHROPIC_API_KEY (gitignored)
+│   └── package.json
 ├── .env.example               # Required environment variables
 ├── CLAUDE.md                  # Claude Code project instructions
 └── README.md
@@ -227,4 +237,4 @@ Completed the tool use layer. All three tools are now formally defined in the An
   - Text spacing issues in the response from the chat in the bubble: fixed by adding CSS rules to ensure consistent spacing between lines and paragraphs in the assistant's responses.
   - Accessing information about events on a specific calendar when referencing that calendar by name in the chat; filter events in the panel based on specific calendar: enhanced the `get_events` tool to accept an optional `calendar_name` parameter, allowing users to specify which calendar's events they want to retrieve.
   - Mis represents what day certain fetched events are occuring on (calendar events from google api are correct, but response from chat is not, usually off by a day): fixed by ensuring that the `get_events` tool returns event data with properly formatted dates and times, and that the system prompt instructs Claude to narrate event times accurately.
-  - UI enhancements to calendar events panel; daily, weekly, monthly, and yearly toggles. If daily is selected, transform the events panel to show only the events for the current day, structured by time. adjusts the chat window portion of the page accprdingly. If weekly is selected, transform the web page and events panel to show the events for the current week, structured by day and time and move and arrange chat window on page appropriately. If monthly is selected, transform the web page and events panel to show the events for the current month, structured by week and day. If yearly is selected, transform the web page and events panel to show the events for the current year, structured by month and day. In each toggle case, ensure the chat window remains functional and appropriately sized, allowing users to interact with the assistant while viewing their calendar events in the selected time frame. Also include a toggle to return to the default view showing all upcoming events. Each toggle can have directional arrows to indicate the ability to navigate forward and backward in time within the selected view (e.g., next week, previous month).
+  - UI enhancements to calendar events panel; daily, weekly, monthly, and yearly toggles. If daily is selected, transform the events panel to show only the events for the current day, structured by time. adjusts the chat window portion of the page accprdingly. If weekly is selected, transform the web page and events panel to show the events for the current week, structured by day and time and move and arrange chat window on page appropriately. If monthly is selected, transform the web page and events panel to show the events for the current month, structured by week and day. If yearly is selected, transform the web page and events panel to show the events for the current year, structured by month and day. In each toggle case, ensure the chat window remains functional and appropriately sized, allowing users to interact with the assistant while viewing their calendar events in the selected time frame. Also include a toggle to return to the default view showing all upcoming events. Each toggle can have directional arrows to indicate the ability to navigate forward and backward in time within the selected view (e.g., next week, previous month):
