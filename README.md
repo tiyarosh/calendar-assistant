@@ -34,10 +34,16 @@ Calendar Assistant is a full-stack web app that authenticates with Google Calend
    cd ../server && npm install
    ```
 
-2. Copy the example env file and fill in your keys:
+2. Copy the example env files and fill in your keys:
 
    ```bash
+   cd client
    cp .env.example .env.local
+   ```
+
+   ```bash
+   cd server
+   cp .env.example .env
    ```
 
 3. Start both servers:
@@ -114,10 +120,10 @@ calendar-assistant/
 
 **Environment Variables**
 
-| Variable                | Description                      |
-| ----------------------- | -------------------------------- |
-| `VITE_GOOGLE_CLIENT_ID` | OAuth client ID from GCP console |
-| `ANTHROPIC_API_KEY`     | Anthropic API key for Claude     |
+| Variable                | Description                                             |
+| ----------------------- | ------------------------------------------------------- |
+| `VITE_GOOGLE_CLIENT_ID` | OAuth client ID from GCP console (provided for testing) |
+| `ANTHROPIC_API_KEY`     | Anthropic API key for Claude (provided by user)         |
 
 ---
 
