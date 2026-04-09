@@ -23,52 +23,158 @@ Calendar Assistant is a full-stack web app that authenticates with Google Calend
 
 ## Quick Start
 
-**Prerequisites:** Node.js 18+, a Google Cloud project with Calendar API enabled, and an Anthropic API key.
+This section walks you through everything from scratch. If you're comfortable working with the CLI, the short version is: install Node 18+, add your keys to `client/.env.local` and `server/.env`, run `npm install` in both directories, and start each server in its own terminal tab.
 
-1. Clone the repo and install dependencies:
+---
 
-   ```bash
-   git clone <repo-url>
-   cd calendar-assistant
-   cd client && npm install
-   cd ../server && npm install
-   ```
+### Step 1 — Install Node.js
 
-2. Copy the example env files and fill in your keys:
+Node.js is the JavaScript runtime that powers the backend server. You need version 18 or later.
 
-   ```bash
-   cd client
-   cp .env.example .env.local
-   ```
+**Check if you already have it:**
 
-   ```bash
-   cd server
-   cp .env.example .env
-   ```
+Open a terminal and run:
 
-3. Start both servers:
+- **Mac:** press `Cmd + Space`, type `Terminal`, press Enter
+- **Windows:** press `Win + X` and choose **Terminal** (or search for "PowerShell" in the Start menu)
 
-   ```bash
-   # Terminal 1 — frontend (port 5173)
-   cd client && npm run dev
 
-   # Terminal 2 — backend (port 3001)
-   cd server && npm run server
-   ```
+```bash
+node --version
+```
 
-4. Open `http://localhost:5173`, sign in with Google, and start chatting.
+If you see `v18.x.x` or higher, you're good. If you get "command not found" or an older version, download the latest LTS release from [nodejs.org](https://nodejs.org) and run the installer.
+
+---
+
+### Step 2 — Get an Anthropic API Key
+
+The AI assistant is powered by Claude. You need an API key to use it.
+
+1. Go to [console.anthropic.com](https://console.anthropic.com) and sign up or log in.
+2. In the left sidebar, click **API Keys**.
+3. Click **Create Key**, give it a name (e.g. "Calendar Assistant"), and copy the key. Save it somewhere — you won't be able to see it again.
+
+---
+
+### Step 3 — Download the Code
+
+If you have Git installed:
+
+```bash
+git clone <repo-url>
+cd calendar-assistant
+```
+
+If you don't have Git, click the **Code** button on the GitHub page and choose **Download ZIP**. Unzip it, then open a terminal and navigate into the folder:
+
+```bash
+cd path/to/calendar-assistant
+```
+
+---
+
+### Step 4 — Add Your API Keys
+
+The app reads secrets from local config files that are never committed to the repo. Example files are included to make this easy.
+
+**Frontend config** — the Google Client ID is already provided in the example file. Just copy it:
+
+```bash
+cd client
+cp .env.example .env.local
+```
+
+> **Windows Command Prompt:** use `copy .env.example .env.local` instead. PowerShell users can use `cp` as written above.
+
+**Backend config** — copy the example, then open `server/.env` in any text editor and replace the placeholder with your Anthropic API key from Step 2:
+
+```bash
+cd server
+cp .env.example .env
+```
+
+> **Windows Command Prompt:** use `copy .env.example .env` instead.
+
+Open `server/.env` and it will look like this — replace the placeholder with your real key:
+
+```
+ANTHROPIC_API_KEY="your-anthropic-api-key-here"
+```
+
+---
+
+### Step 5 — Install Dependencies
+
+In your terminal, run these four commands one at a time:
+
+```bash
+cd client
+npm install
+cd ../server
+npm install
+```
+
+This downloads the packages each part of the app needs. It only takes a minute or two.
+
+---
+
+### Step 6 — Start the App
+
+The app has two parts that run simultaneously — a frontend and a backend. You need to run them in **two separate terminal windows or tabs**.
+
+**Terminal 1 — start the frontend:**
+
+```bash
+cd client
+npm run dev
+```
+
+You'll see output ending in something like `Local: http://localhost:5173`. Leave this terminal running.
+
+**Terminal 2 — start the backend:**
+
+Open a new terminal window or tab (Mac: `Cmd + T` in Terminal — Windows: `Ctrl + T` in Windows Terminal, or open a new PowerShell window), navigate back to the project folder, then run:
+
+```bash
+cd server
+npm run server
+```
+
+You'll see `Server listening on port 3001`. Leave this running too.
+
+---
+
+### Step 7 — Open the App
+
+Go to [http://localhost:5173](http://localhost:5173) in your browser. Click **Sign in with Google**, authorize the app with the Google account you added as a test user in Step 3, and start chatting.
 
 ---
 
 ## How to Run
 
-| Command                       | Description                        |
-| ----------------------------- | ---------------------------------- |
-| `cd client && npm run dev`    | Start Vite dev server on port 5173 |
-| `cd server && npm run server` | Start Express backend on port 3001 |
-| `cd client && npm run build`  | Build frontend for production      |
+Both servers need to be running at the same time whenever you use the app. Open two terminal tabs, one for each:
 
-The Vite dev server proxies all `/api` requests to `localhost:3001`, so no CORS config is needed during development.
+| Terminal | Command                       | What it does                        |
+| -------- | ----------------------------- | ----------------------------------- |
+| 1        | `cd client && npm run dev`    | Starts the frontend on port 5173    |
+| 2        | `cd server && npm run server` | Starts the backend API on port 3001 |
+
+To stop either server, click into that terminal window and press `Ctrl + C`.
+
+If the backend won't start because port 3001 is already in use, run this to free it:
+
+**Mac / Linux:**
+```bash
+lsof -ti tcp:3001 | xargs kill
+```
+
+**Windows (PowerShell):**
+```powershell
+Stop-Process -Id (netstat -ano | Select-String ":3001" | ForEach-Object { ($_ -split '\s+')[-1] }) -Force
+```
+
+Then start the server again.
 
 ---
 
