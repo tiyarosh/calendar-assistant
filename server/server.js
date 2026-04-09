@@ -112,6 +112,52 @@ const TOOLS = [
       required: ['recipient_name', 'subject', 'context'],
     },
   },
+  {
+    name: 'search_drive',
+    description: "Search the user's Google Drive for files related to a meeting or topic. Use this before drafting a brief to surface relevant documents, decks, or notes. Returns file names, types, and links.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search terms — use the meeting title, attendee names, or topic keywords.',
+        },
+        max_results: {
+          type: 'integer',
+          description: 'Maximum number of files to return. Defaults to 5.',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'draft_brief',
+    description: 'Format and return a meeting brief. Always call this tool when the user asks to prepare for a meeting or draft a brief — never write briefs as plain text.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        meeting_title:      { type: 'string', description: 'Title of the meeting.' },
+        meeting_time:       { type: 'string', description: 'Formatted date and time of the meeting.' },
+        attendees:          { type: 'array', items: { type: 'string' }, description: 'List of attendee names and/or emails.' },
+        objective:          { type: 'string', description: 'Purpose or goal of the meeting.' },
+        talking_points:     { type: 'array', items: { type: 'string' }, description: 'Key agenda items or discussion points.' },
+        relevant_documents: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name:    { type: 'string', description: 'File name.' },
+              link:    { type: 'string', description: 'Link to the file in Drive.' },
+              summary: { type: 'string', description: 'A 2-4 sentence summary of the document content, based on the content field returned by search_drive. Focus on what is relevant to this meeting.' },
+            },
+          },
+          description: 'Relevant Drive files from search_drive. For each file, read its content field and write a concise summary of what is relevant to this meeting.',
+        },
+        context: { type: 'string', description: 'Any additional context or notes from the user or event description.' },
+      },
+      required: ['meeting_title', 'meeting_time', 'objective'],
+    },
+  },
 ]
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -134,6 +180,8 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 - \`analyze_schedule\` — fetch events and compute meeting load stats; use this for questions about busyness, free time, or schedule patterns
 - \`draft_email\` — format and present an email draft; always use this tool when composing emails
 - \`create_event\` — create a new event on the user's Google Calendar
+- \`search_drive\` — search the user's Google Drive for files related to a meeting or topic
+- \`draft_brief\` — format and present a meeting brief; always use this tool when preparing for a meeting
 
 ## Instructions
 
@@ -155,6 +203,14 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 2. After a successful creation, confirm the event name and time in your response.
 3. Attendees are added to the event but not notified — inform the user of this.
 4. If the request is ambiguous (e.g. "Thursday" without a specific date), ask for clarification before proceeding.
+
+### Meeting Brief Drafting
+1. When the user asks to prepare for a meeting or draft a brief, first call \`get_events\` to retrieve the meeting details — time, attendees, description.
+2. Then call \`search_drive\` using the meeting title and attendee names as search terms to surface relevant documents.
+3. Read the \`content\` field returned for each file in the search results. Use that content to write a 2-4 sentence summary per document focused on what is relevant to this specific meeting. Pass those summaries in the \`relevant_documents\` array when calling \`draft_brief\`.
+4. Call \`draft_brief\` with all compiled information: meeting title, time, attendees, objective, talking points (derived from event context and document content), and the documents with their summaries.
+5. After calling \`draft_brief\`, always include the complete brief in your reply using the \`formatted\` field from the tool result. Never summarize or omit it.
+6. If \`search_drive\` returns no results, still proceed with \`draft_brief\` — omit the documents section.
 
 ### General Behavior
 - Be concise but thorough. Provide all relevant details without unnecessary filler.
@@ -339,6 +395,104 @@ async function executeCreateEvent({ summary, start_datetime, end_datetime, timez
   }
 }
 
+// Maps Google Workspace MIME types to a plain-text export format.
+// Only types in this map will have their content fetched; others are skipped.
+const DRIVE_EXPORT_TYPES = {
+  'application/vnd.google-apps.document':     'text/plain',
+  'application/vnd.google-apps.spreadsheet':  'text/csv',
+  'application/vnd.google-apps.presentation': 'text/plain',
+}
+
+// Fetches the text content of a Drive file, truncated to avoid context bloat.
+// Returns null for unsupported types or on non-fatal errors.
+async function fetchDriveFileContent(fileId, mimeType) {
+  const exportMime = DRIVE_EXPORT_TYPES[mimeType]
+  if (!exportMime && mimeType !== 'text/plain') return null
+
+  const url = exportMime
+    ? `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(exportMime)}`
+    : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${cachedToken}` } })
+  if (res.status === 401) { cachedToken = null; throw new TokenExpiredError() }
+  if (!res.ok) return null
+
+  const text = await res.text()
+  return text.slice(0, 3000) // truncate — enough for Claude to summarize without bloating context
+}
+
+async function executeSearchDrive({ query, max_results = 5 }) {
+  const escaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const q = `name contains '${escaped}' or fullText contains '${escaped}'`
+
+  const url = new URL('https://www.googleapis.com/drive/v3/files')
+  url.searchParams.set('q', q)
+  url.searchParams.set('fields', 'files(id,name,mimeType,webViewLink,modifiedTime)')
+  url.searchParams.set('pageSize', String(max_results))
+  url.searchParams.set('orderBy', 'modifiedTime desc')
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${cachedToken}` } })
+  if (res.status === 401) { cachedToken = null; throw new TokenExpiredError() }
+  if (!res.ok) throw new Error(`Drive search failed: ${res.status}`)
+
+  const data = await res.json()
+
+  // Fetch text content for each file in parallel so Claude can summarize it
+  const files = await Promise.all(
+    (data.files || []).map(async (f) => {
+      const content = await fetchDriveFileContent(f.id, f.mimeType)
+      return {
+        name: f.name,
+        type: f.mimeType,
+        link: f.webViewLink,
+        last_modified: f.modifiedTime,
+        content: content ?? 'Content unavailable for this file type.',
+      }
+    })
+  )
+
+  return files
+}
+
+function executeDraftBrief({ meeting_title, meeting_time, attendees = [], objective, talking_points = [], relevant_documents = [], context }) {
+  const attendeeBlock = attendees.length > 0
+    ? `Attendees: ${attendees.join(', ')}`
+    : null
+
+  const talkingPointsBlock = talking_points.length > 0
+    ? `Talking Points:\n${talking_points.map((p) => `  - ${p}`).join('\n')}`
+    : null
+
+  const docsBlock = relevant_documents.length > 0
+    ? `Relevant Documents:\n${relevant_documents.map((d) => {
+        const summary = d.summary ? `\n    ${d.summary}` : ''
+        return `  - ${d.name}: ${d.link}${summary}`
+      }).join('\n')}`
+    : null
+
+  const contextBlock = context ? `Additional Context:\n${context}` : null
+
+  const sections = [
+    `Meeting Brief: ${meeting_title}`,
+    `Time: ${meeting_time}`,
+    attendeeBlock,
+    `Objective: ${objective}`,
+    talkingPointsBlock,
+    docsBlock,
+    contextBlock,
+  ].filter(Boolean)
+
+  return {
+    meeting_title,
+    meeting_time,
+    attendees,
+    objective,
+    talking_points,
+    relevant_documents,
+    formatted: sections.join('\n\n'),
+  }
+}
+
 function executeDraftEmail({ recipient_name, subject, context }) {
   return {
     to: recipient_name,
@@ -432,6 +586,10 @@ app.post('/api/chat', async (req, res) => {
               result = await executeAnalyzeSchedule(block.input)
             } else if (block.name === 'draft_email') {
               result = executeDraftEmail(block.input)
+            } else if (block.name === 'search_drive') {
+              result = await executeSearchDrive(block.input)
+            } else if (block.name === 'draft_brief') {
+              result = executeDraftBrief(block.input)
             } else if (block.name === 'create_event') {
               result = await executeCreateEvent(block.input)
             } else {
