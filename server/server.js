@@ -162,17 +162,20 @@ const TOOLS = [
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
-function buildSystemPrompt() {
-  const date = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+function buildSystemPrompt(timezone) {
+  const now = new Date()
+  const tz = timezone || 'UTC'
+
+  const dateStr = now.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz,
+  })
+  const timeStr = now.toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', timeZone: tz,
   })
 
   return `# Calendar Assistant
 
-You are a highly capable calendar assistant. Today's date is **${date}**.
+You are a highly capable calendar assistant. Today is **${dateStr}** and the current local time is **${timeStr}** (${tz}). Current time in UTC: ${now.toISOString()}.
 
 ## Tools Available
 
@@ -190,6 +193,8 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 2. Use \`analyze_schedule\` for questions about meeting load, free time, or patterns. Use \`get_events\` for specific event lookups.
 3. Present calendar information chronologically with times, event names, and relevant details such as location or attendees. Always use the pre-formatted \`display_date\` field for dates and times — never interpret or convert \`start.dateTime\` or \`start.date\` yourself.
 4. When checking for conflicts or free time, compare all relevant events and explicitly state any overlaps or open windows.
+5. When constructing date ranges, use the current UTC time above as your reference for "now". For "rest of today", set \`start_date\` to the current UTC time and \`end_date\` to midnight tonight in the user's timezone. Never default to midnight UTC as the start time for present-tense queries.
+6. Only pass \`calendar_name\` when the user explicitly names a specific calendar (e.g. "my work calendar"). For general queries like "what's on my schedule", omit \`calendar_name\` entirely so all calendars are searched.
 
 ### Email Drafting
 1. Always call \`draft_email\` when composing emails — never write them as plain text.
@@ -552,7 +557,7 @@ app.post('/api/chat', async (req, res) => {
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
-        system: buildSystemPrompt(),
+        system: buildSystemPrompt(timezone),
         tools: TOOLS,
         messages: currentMessages,
       })
