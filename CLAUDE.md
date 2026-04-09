@@ -13,24 +13,34 @@ React + Node app: Google Calendar OAuth → calendar display → chat agent (Cla
 ## Project Structure
 
 ```
-client/
-├── src/
-│   ├── App.jsx                    # Auth gate — routes on accessToken presence
-│   ├── index.css                  # Tailwind directives only
-│   └── components/
-│       ├── LoginScreen.jsx        # GIS OAuth sign-in (real, not mock)
-│       ├── MainLayout.jsx         # Header + two-panel shell
-│       ├── CalendarPanel.jsx      # Left panel: live calendar events
-│       └── ChatPanel.jsx          # Right panel: SSE streaming chat
-├── index.html                     # Loads GIS script via CDN (<script async>)
-├── vite.config.js                 # Proxies /api → localhost:3001 (not used for chat — see SSE note)
-├── tailwind.config.js             # darkMode: 'media'
-├── .env.local                     # VITE_GOOGLE_CLIENT_ID (gitignored)
-└── package.json
-server/
-├── server.js                      # Single-file Express server
-├── .env                           # ANTHROPIC_API_KEY (gitignored)
-└── package.json
+calendar-assistant/
+├── client/                    # React + Vite frontend
+│   ├── src/
+│   │   ├── App.jsx            # Auth gate — routes between login and main layout
+│   │   ├── index.css          # Tailwind CSS directives
+│   │   └── components/
+│   │       ├── LoginScreen.jsx    # Google OAuth sign-in
+│   │       ├── MainLayout.jsx     # Header + two-panel shell
+│   │       ├── CalendarPanel.jsx  # Daily/weekly/monthly/upcoming views with grid, nav, and event popup
+│   │       └── ChatPanel.jsx      # Conversational chat UI
+│   ├── vite.config.js         # Vite config + /api proxy
+│   ├── tailwind.config.js
+│   └── package.json
+├── server/                    # Node.js + Express backend
+│   ├── server.js              # Single-file Express server — tools, prompt, SSE chat handler
+│   │   ├── TOOLS              # Anthropic tool definitions: get_events, analyze_schedule, draft_email
+│   │   ├── buildSystemPrompt()       # Injects today's date and plain-text behavior instructions
+│   │   ├── formatDisplayDateTime()   # Formats event dates in the user's IANA timezone
+│   │   ├── fetchCalendarEvents()     # Shared Google Calendar fetch (calendarList + parallel events)
+│   │   ├── executeGetEvents()        # Runs get_events tool — supports optional calendar_name filter
+│   │   ├── executeAnalyzeSchedule()  # Computes meeting load stats for Claude to narrate
+│   │   ├── executeDraftEmail()       # Packages email fields into a consistent formatted result
+│   │   └── POST /api/chat     # SSE endpoint — tool use loop, keepalive pings, auth expiry handling
+│   ├── .env                   # ANTHROPIC_API_KEY (gitignored)
+│   └── package.json
+├── .env.example               # Required environment variables
+├── CLAUDE.md                  # Claude Code project instructions
+└── README.md
 ```
 
 ## Key Patterns
@@ -90,7 +100,7 @@ If port 3001 is already in use: `lsof -ti tcp:3001 | xargs kill`
 ## Constraints
 
 - No database — session only
-- Don't send emails — draft inline in chat only
+- Send email functionality is configured with sendUpdates paramater set to : "none" — attendees are listed but not notified, keeping the human in the loop
 - No component library — Tailwind only
 - Prioritize working end-to-end over polish
 
@@ -100,3 +110,4 @@ If port 3001 is already in use: `lsof -ti tcp:3001 | xargs kill`
 - **Milestone 2 (2026-04-07):** Google OAuth (real GIS) + live multi-calendar event fetching
 - **Milestone 3 (2026-04-07):** Dark mode (system preference) + Express backend + Claude SSE streaming chat + `req`/`res` close bug fixed
 - **Milestone 4 (2026-04-07):** Full Tool Suite, Token Caching + Auth Expiry
+- **Milestone 5 (2026-04-08):** User Acceptance Testing, UI Polish, System Prompt Refinement, and Documentation. Ran through multiple real-world scenarios, including heavy meeting weeks, all-day events, and expired tokens; verified correct tool use, graceful error handling, and overall UX flow

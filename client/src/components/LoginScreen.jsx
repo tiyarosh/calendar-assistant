@@ -2,7 +2,7 @@ export default function LoginScreen({ onLogin }) {
   function handleSignIn() {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/calendar.readonly',
+      scope: 'https://www.googleapis.com/auth/calendar',
       callback: (response) => {
         if (response.error) {
           console.error('OAuth error:', response.error)

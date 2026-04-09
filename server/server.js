@@ -74,6 +74,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'create_event',
+    description: "Create a new event on the user's Google Calendar. Always confirm event details with the user before calling this tool.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        summary:        { type: 'string', description: 'Event title.' },
+        start_datetime: { type: 'string', description: 'Start time as ISO 8601 datetime string (e.g. 2026-04-10T14:00:00).' },
+        end_datetime:   { type: 'string', description: 'End time as ISO 8601 datetime string. Default to 1 hour after start if not specified.' },
+        timezone:       { type: 'string', description: 'IANA timezone string (e.g. America/New_York).' },
+        description:    { type: 'string', description: 'Optional event description or agenda.' },
+        attendees:      { type: 'array', items: { type: 'string' }, description: 'Optional list of attendee email addresses.' },
+        calendar_id:    { type: 'string', description: 'Optional calendar ID. Defaults to primary.' },
+      },
+      required: ['summary', 'start_datetime', 'end_datetime', 'timezone'],
+    },
+  },
+  {
     name: 'draft_email',
     description: 'Format and return an email draft. Always call this tool when the user asks you to write, draft, or compose an email — never write email drafts as plain text. You supply all content; the tool packages it consistently.',
     input_schema: {
@@ -116,6 +133,7 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 - \`get_events\` — fetch raw calendar events for a date range
 - \`analyze_schedule\` — fetch events and compute meeting load stats; use this for questions about busyness, free time, or schedule patterns
 - \`draft_email\` — format and present an email draft; always use this tool when composing emails
+- \`create_event\` — create a new event on the user's Google Calendar
 
 ## Instructions
 
@@ -131,6 +149,12 @@ You are a highly capable calendar assistant. Today's date is **${date}**.
 3. This applies to every draft request, including rewrites, tone changes, or revisions — always output the full updated email text.
 4. Do not send the email. Present it for the user's review and wait for explicit approval.
 5. Pre-fill recipient, subject, and body from calendar context when available (attendee names, event times, proposed alternatives).
+
+### Event Creation
+1. Before calling \`create_event\`, always confirm the details with the user — title, date, time, duration, and attendees if applicable.
+2. After a successful creation, confirm the event name and time in your response.
+3. Attendees are added to the event but not notified — inform the user of this.
+4. If the request is ambiguous (e.g. "Thursday" without a specific date), ask for clarification before proceeding.
 
 ### General Behavior
 - Be concise but thorough. Provide all relevant details without unnecessary filler.
@@ -277,6 +301,44 @@ async function executeAnalyzeSchedule({ start_date, end_date }) {
   }
 }
 
+async function executeCreateEvent({ summary, start_datetime, end_datetime, timezone, description, attendees, calendar_id }) {
+  const calId = calendar_id || 'primary'
+  const tz = timezone || 'UTC'
+
+  const event = {
+    summary,
+    start: { dateTime: start_datetime, timeZone: tz },
+    end:   { dateTime: end_datetime,   timeZone: tz },
+  }
+  if (description)       event.description = description
+  if (attendees?.length) event.attendees = attendees.map((email) => ({ email }))
+
+  const url = new URL(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`
+  )
+  url.searchParams.set('sendUpdates', 'none')
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(event),
+  })
+
+  if (res.status === 401) { cachedToken = null; throw new TokenExpiredError() }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(`Failed to create event: ${err.error?.message || res.status}`)
+  }
+
+  const created = await res.json()
+  return {
+    id:           created.id,
+    summary:      created.summary,
+    display_date: formatDisplayDateTime(created.start, created.end, tz),
+    link:         created.htmlLink,
+  }
+}
+
 function executeDraftEmail({ recipient_name, subject, context }) {
   return {
     to: recipient_name,
@@ -370,6 +432,8 @@ app.post('/api/chat', async (req, res) => {
               result = await executeAnalyzeSchedule(block.input)
             } else if (block.name === 'draft_email') {
               result = executeDraftEmail(block.input)
+            } else if (block.name === 'create_event') {
+              result = await executeCreateEvent(block.input)
             } else {
               result = { error: `Unknown tool: ${block.name}` }
             }
